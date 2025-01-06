@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <errno.h> 
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -164,28 +166,57 @@ int loginUser(int sd)
     return -1;
 }
 
-void meniu_account()
-{
+void meniu_account() {
     printf("-----------------------------------------CONT------------------------------------------------------\n");
-    printf("AFISEAZĂ SOLDUL\n");
-    printf("ADD CHELTUIALĂ <type:valoare>\n");
-    printf("ADD VENIT <type:valoare>\n");
-    printf("ANALIZĂ FINANCIARĂ\n");
-    printf("SUGESTII ECONOMISIRE\n");
+    printf("AFISEAZA SOLDUL\n");
+    printf("AFISEAZA BUDGET\n");
+    printf("ADD TRANSACTION <type:valoare:descriere>\n");
+    printf("ADD VENIT <valoare:descriere>\n");
+    printf("CATEGORII\n");
+    printf("LUNA\n");
+    printf("ANALIZA FINANCIARA\n");
     printf("LIST_TRANSACTIONS\n");
+    printf("SUGESTII ECONOMISIRE\n");
     printf("QUIT\n");
     printf("-------------------------------------------------------------------------------------------------\n");
 }
 
+void golesteSocket(int sd)
+{
+    char buffer[1024];
+    ssize_t bytes_read;
+
+    // Setăm socketul în mod non-blocant
+    int flags = fcntl(sd, F_GETFL, 0);
+    fcntl(sd, F_SETFL, flags | O_NONBLOCK);
+
+    // Citim toate datele disponibile din socket
+    while ((bytes_read = read(sd, buffer, sizeof(buffer))) > 0)
+    {
+        // Doar consumăm datele, fără a face nimic cu ele
+    }
+
+    // Verificăm erorile, dar ignorăm dacă nu sunt date disponibile
+    if (bytes_read < 0 && errno != EAGAIN && errno != EWOULDBLOCK)
+    {
+        perror("Eroare la golirea socketului");
+    }
+
+    // Revenim la modul blocant
+    fcntl(sd, F_SETFL, flags);
+}
+
+
 void comenziClient(int sd)
 {
-    char comanda[1024], raspuns[1024];
+    char comanda[1024];
+    char buffer[4096];
 
     while (1)
     {
         printf("Introduceti comanda: ");
         fgets(comanda, sizeof(comanda), stdin);
-        comanda[strcspn(comanda, "\n")] = '\0';
+        comanda[strcspn(comanda, "\n")] = '\0'; // Eliminăm newline-ul
 
         if (strcmp(comanda, "QUIT") == 0)
         {
@@ -193,20 +224,34 @@ void comenziClient(int sd)
             break;
         }
 
+        // Golește socketul de mesaje anterioare
+        golesteSocket(sd);
+
+        // Trimite comanda către server
         if (write(sd, comanda, strlen(comanda) + 1) <= 0)
         {
             perror("Eroare - write()");
             break;
         }
 
-        if (read(sd, raspuns, sizeof(raspuns)) > 0)
+        // Citim răspunsurile din server
+        ssize_t bytes_read;
+        do
         {
-            printf("Raspuns server: %s\n", raspuns);
-        }
-        else
-        {
-            perror("Eroare - read()");
-            break;
-        }
+            memset(buffer, 0, sizeof(buffer)); // Golește bufferul înainte de citire
+            bytes_read = read(sd, buffer, sizeof(buffer) - 1);
+
+            if (bytes_read > 0)
+            {
+                buffer[bytes_read] = '\0'; // Null-terminate pentru siguranță
+                printf("%s \n", buffer);     // Afișăm răspunsul primit
+                
+            }
+            else if (bytes_read < 0)
+            {
+                perror("Eroare - read()");
+                break;
+            }
+        } while (bytes_read == sizeof(buffer) - 1); // Continuăm citirea dacă bufferul e plin
     }
 }
